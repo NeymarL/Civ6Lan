@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self' data:">
+<title>Civ6 LAN</title><link rel="stylesheet" href="style.css"></head>
+<body><main>
+<header><div class="brand">VI<span>CIV6 LAN</span></div><span class="badge">早期测试版 · 0.2.1</span></header>
+<section class="intro"><div class="eyebrow">远方的朋友，同一张地图</div><h1>下一回合，一起。</h1><p>连接虚拟局域网，在文明 VI 中开始你们的对局。</p></section>
+<div id="notice" role="status" aria-live="polite" hidden></div>
+<section class="panel connection"><div><span class="dot" id="dot"></span><strong id="service">正在检查本机组网服务…</strong><p id="device">首次使用请点击“自动下载安装”，按系统提示完成安装。</p></div><div id="connectionActions" class="actions"><button id="download" class="quiet">自动下载安装</button><button id="authorize">授权连接</button></div></section>
+<section id="installation" class="panel" hidden aria-live="polite"><strong id="installTitle">准备安装网络组件</strong><p id="installMessage"></p><progress id="installProgress" max="100" aria-label="ZeroTier 下载进度"></progress><div class="actions"><button id="cancelDownload" hidden>取消下载</button><button id="retryInstallCheck" hidden>安装后重试</button></div></section>
+<details id="advanced"><summary>无法自动授权？输入本机 API Token</summary><p>令牌仅用于本机服务，不会上传或保存。Windows 用户可在运行 ZeroTier 桌面程序后重试。详细位置见 README。</p><div class="row"><input id="token" type="password" autocomplete="off" placeholder="本机 authtoken.secret 内容" aria-label="本机 API Token"><button id="saveToken">连接</button></div></details>
+<section id="lobby" class="grid"><article class="panel"><div class="eyebrow">01 / 我来组织</div><h2>创建好友房间</h2><p>本机作为网络控制器。房主需要保持电脑及 ZeroTier 服务运行。</p><label for="name">房间名称</label><input id="name" maxlength="48" value="今晚再来一回合"><button id="create" class="primary wide">创建房间 ↗</button></article>
+<article class="panel"><div class="eyebrow">02 / 朋友已就位</div><h2>加入好友房间</h2><p>输入房主分享的邀请码，申请加入后请房主核对设备 ID 并批准。</p><label for="code">邀请码</label><input id="code" placeholder="CIV6-0123456789abcdef" spellcheck="false"><button id="join" class="wide">申请加入 →</button></article></section>
+<section id="room" class="panel" hidden><div class="room-top"><div><div class="eyebrow" id="role"></div><h2 id="roomName"></h2></div><button id="leave" class="danger">退出房间</button></div><div class="invite"><code id="invite"></code><button id="copy">复制邀请码</button></div><div class="metrics"><div><label>网络状态</label><strong id="networkState">—</strong></div><div><label>本机虚拟 IP</label><strong id="ip">—</strong></div><div><label>已批准 / 已发现</label><strong id="count">—</strong></div></div><p id="hint"></p><div id="members"></div><div id="peers"></div></section>
+<section class="panel guide"><h3>连接之后，在游戏内加入</h3><ol><li>房主进入 <b>多人游戏 → 局域网 → 创建游戏</b>。</li><li>朋友在局域网列表里找到房间并加入。</li><li>确认游戏版本、规则集和 MOD 一致。网络就绪不代表游戏兼容性已验证。</li></ol><div class="actions"><button id="steam">启动文明 VI</button><button id="diagnostics" class="quiet">导出诊断</button></div></section>
+<footer>Windows + macOS · Steam · 目标 3 人及以上 · 跨平台实战待验证<br>退出 App 会保留网络；“退出房间”才会断开。请仅批准认识的设备。</footer>
+</main><script src="renderer.js"></script></body></html>

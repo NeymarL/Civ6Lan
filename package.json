@@ -1,0 +1,43 @@
+{
+  "name": "civ6-lan-companion",
+  "version": "0.2.1",
+  "private": true,
+  "description": "文明6异地局域网联机助手",
+  "main": "src/main.js",
+  "author": "Civ6 LAN",
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "start": "electron .",
+    "test": "node tests/run.js && node tests/installer.js && node tests/service-config.js",
+    "pack": "electron-builder --dir",
+    "dist:mac": "electron-builder --mac zip",
+    "dist:win": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "electron-builder": "26.0.12"
+  },
+  "build": {
+    "appId": "local.civ6.lan",
+    "productName": "Civ6 LAN",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
