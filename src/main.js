@@ -5,12 +5,14 @@ const os = require('os');
 const {execFile} = require('child_process');
 const {Network,request} = require('./network');
 const {downloadInstaller} = require('./installer');
-const {servicePort} = require('./service-config');
+const {servicePort,requestWithServiceToken} = require('./service-config');
+const {restartService} = require('./restart-service');
 if(process.argv.some(arg=>['--smoke-test','--download-test'].includes(arg))) {
   const testData=path.join(os.tmpdir(),'civ6-lan-check-'+process.pid);
   require('fs').mkdirSync(testData,{recursive:true});app.setPath('userData',testData);
 }
 let win, token, service, busy = false;
+let lastRoomSnapshot;
 let installState={phase:'idle'}, downloadAbort;
 function installProgress(value) {
   installState=value;
@@ -55,17 +57,14 @@ async function installZeroTier() {
     throw error;
   } finally {clearTimeout(timeout);downloadAbort=undefined;}
 }
-const tokenPaths = process.platform === 'win32' ? [
-  path.join(process.env.LOCALAPPDATA || os.homedir(),'ZeroTier','One','authtoken.secret'),
-  path.join(process.env.ProgramData || 'C:\\ProgramData','ZeroTier','One','authtoken.secret')
-] : [path.join(os.homedir(),'Library/Application Support/ZeroTier/One/authtoken.secret'),
-  '/Library/Application Support/ZeroTier/One/authtoken.secret'];
-async function loadToken() {
-  if (token) return token;
-  for (const file of tokenPaths) {
-    try { const value = (await fs.readFile(file,'utf8')).trim(); if (value) return (token=value); } catch (_) {}
-  }
-  throw new Error('需要本机服务授权。点击“授权连接”；Windows 可先打开 ZeroTier One 托盘程序后重试。');
+async function requestLocalService(method, url, body) {
+  const port = await servicePort();
+  const result = await requestWithServiceToken({
+    cachedToken: token,
+    send: value => request(value, method, url, body, port)
+  });
+  token = result.token;
+  return result.data;
 }
 async function atomicSave(value) {
   const file = path.join(app.getPath('userData'),'room.json');
@@ -86,9 +85,16 @@ function handle(name, fn, mutation = false) {
   });
 }
 async function authorize() {
-  token = undefined;
-  try { await loadToken(); await service.api('GET','/status'); return; } catch (_) { token=undefined; }
-  if (process.platform !== 'darwin') throw new Error('请先运行 ZeroTier One 桌面程序后重试；也可在下方输入本机 API Token。不要输入 Central 云端令牌。');
+  try {
+    await service.api('GET','/status');
+    return;
+  } catch (error) {
+    if (!['ZT_AUTH','ZT_TOKEN_MISSING'].includes(error.code)) throw error;
+    if (process.platform === 'win32') {
+      throw new Error(`${error.message} 请先从开始菜单打开 ZeroTier One 后重试。仍失败时，可由本机管理员把 ZeroTier 的 authtoken.secret 文件内容填到下方。`);
+    }
+    if (process.platform !== 'darwin') throw error;
+  }
   // 固定命令，无用户输入；只在用户点击时触发系统授权。令牌仅保留在主进程内存。
   const script = 'do shell script "/bin/cat \'/Library/Application Support/ZeroTier/One/authtoken.secret\'" with administrator privileges';
   token = await new Promise((resolve,reject)=>execFile('/usr/bin/osascript',['-e',script],{timeout:120000},(error,stdout)=>{
@@ -114,23 +120,31 @@ else app.whenReady().then(async()=>{
   let saved={};
   try { saved=JSON.parse(await fs.readFile(path.join(app.getPath('userData'),'room.json'),'utf8')); } catch (_) {}
   if (saved.room && !/^[0-9a-f]{16}$/.test(saved.room.id)) saved={};
-  service=new Network(async(method,url,body)=>request(await loadToken(),method,url,body,await servicePort()),atomicSave,saved);
+  service=new Network(requestLocalService,atomicSave,saved);
   handle('snapshot',async()=>{
-    const state=await service.snapshot();
+    const state=await service.snapshot({includePeers:false});
+    lastRoomSnapshot=state;
     if(installState.phase==='waiting')installProgress({phase:'complete',message:'已检测到 ZeroTier 服务，可以创建或加入房间。'});
     return state;
   });
+  handle('roomLinks',async()=>lastRoomSnapshot ? service.roomLinks(lastRoomSnapshot) : null);
   handle('authorize',authorize,true);
+  handle('restartService',async()=>{
+    const status = await restartService(()=>service.api('GET','/status'));
+    return {online:status.online};
+  },true);
   handle('token',async value=>{
     if(typeof value !== 'string' || !/^[a-zA-Z0-9]{16,128}$/.test(value.trim())) throw new Error('本机 API Token 格式无效。');
-    token=value.trim();
-    try { await service.api('GET','/status'); } catch(error) { token=undefined; throw error; }
+    const candidate = value.trim();
+    await request(candidate, 'GET', '/status', undefined, await servicePort());
+    token = candidate;
   },true);
   handle('create',name=>service.create(name),true);
   handle('join',code=>service.join(code),true);
   handle('member',(id,allow)=>service.authorize(id,allow),true);
   handle('leave',async()=>{
     if(!service.room) return;
+    if(service.room.existingNetwork) return service.leave();
     const answer=await dialog.showMessageBox(win,{type:'question',buttons:['取消','确认退出'],defaultId:0,cancelId:0,
       message:service.room.host?'关闭房间并退出？':'退出虚拟局域网？',
       detail:service.room.host?'这会删除本应用创建的网络，所有朋友将失去该网络的联机权限。':'文明6连接可能中断。'});

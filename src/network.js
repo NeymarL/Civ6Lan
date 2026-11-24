@@ -21,13 +21,20 @@ function request(token, method, path, body, port=9993) {
       res.on('data', chunk => { raw += chunk; if (raw.length > 4e6) req.destroy(new Error('服务响应过大。')); });
       res.on('end', () => {
         if (method === 'DELETE' && res.statusCode === 404) return resolve({});
-        if (res.statusCode === 401 || res.statusCode === 403) return reject(new Error('本机服务授权失败，请重新授权。'));
+        if (res.statusCode === 401 || res.statusCode === 403) {
+          return reject(Object.assign(new Error('ZeroTier 拒绝了本机令牌，请重新授权。'), {code:'ZT_AUTH'}));
+        }
         if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error(`ZeroTier 服务返回 ${res.statusCode}，请确认服务和控制器可用。`));
         try { resolve(raw ? JSON.parse(raw) : {}); } catch (_) { reject(new Error('ZeroTier 响应格式无效。')); }
       });
     });
     req.setTimeout(6000, () => req.destroy(new Error('本机 ZeroTier 服务响应超时。')));
-    req.on('error', error => reject(new Error(error.code === 'ECONNREFUSED' ? `无法连接本机 ZeroTier 服务（端口 ${port}）。请确认服务已启动，再点击“授权连接”。` : error.message)));
+    req.on('error', error => {
+      if(error.code === 'ECONNREFUSED') {
+        const hint = process.platform === 'win32' ? '请到任务管理器 → 服务，确认 ZeroTierOneService 正在运行。' : '请确认 ZeroTier 服务正在运行。';
+        reject(new Error(`无法连接本机 ZeroTier 服务（端口 ${port}）。${hint}`));
+      } else reject(error);
+    });
     req.end(data);
   });
 }
@@ -68,8 +75,12 @@ class Network {
   async join(code) {
     if (this.room) throw new Error('请先离开当前房间。');
     const id = networkId(code);
-    const existing = await this.api('GET', '/network');
-    if (existing.some(n => (n.id || n.nwid) === id)) throw new Error('本机已通过其他方式加入此网络。请先在 ZeroTier 中确认并退出，再用本应用加入。');
+    const networks = await this.api('GET', '/network');
+    const existing = networks.find(network => (network.id || network.nwid) === id);
+    if (existing) {
+      await this.save({id, host:false, existingNetwork:true});
+      return this.room;
+    }
     await this.api('POST', `/network/${id}`, {allowManaged:true,allowGlobal:false,allowDefault:false,allowDNS:false});
     try { await this.save({id,host:false}); }
     catch (error) { await this.api('DELETE', `/network/${id}`).catch(()=>{}); throw error; }
@@ -77,10 +88,10 @@ class Network {
   }
   async leave() {
     if (!this.room) return;
-    const {id,host} = this.room;
+    const {id,host,existingNetwork} = this.room;
     // 房主离开即关闭控制器网络，朋友的网络配置会失效。
     if (host) await this.api('DELETE', `/controller/network/${id}`);
-    await this.api('DELETE', `/network/${id}`);
+    if (!existingNetwork) await this.api('DELETE', `/network/${id}`);
     await this.save(null);
   }
   async authorize(member, authorized) {
@@ -89,24 +100,49 @@ class Network {
     if (member === status.address) throw new Error('不能撤销房主自己的授权。');
     return this.api('POST', `/controller/network/${this.room.id}/member/${nodeId(member)}`, {authorized:!!authorized});
   }
-  async snapshot() {
+  async snapshot({includePeers = true} = {}) {
+    const room = this.room;
     const status = await this.api('GET','/status');
-    const result = {address:status.address,online:status.online,version:status.version,room:this.room};
-    if (!this.room) return result;
-    const id = this.room.id;
+    const result = {address:status.address,online:status.online,version:status.version,room};
+    if (!room) return result;
+    const id = room.id;
     const networks = await this.api('GET','/network');
     const network = networks.find(n => (n.id || n.nwid) === id);
     result.network = network || {status:'NOT_JOINED'};
-    if (this.room.host) {
+    if (room.host) {
       const members = await this.api('GET',`/controller/network/${id}/member`);
       result.members = await Promise.all(Object.keys(members).map(member =>
         this.api('GET',`/controller/network/${id}/member/${nodeId(member)}`)));
     }
+    if (!includePeers) return result;
     const peers = await this.api('GET','/peer');
     const memberIds = new Set((result.members || []).map(m => m.address || m.id));
-    result.peers = peers.filter(p => memberIds.has(p.address) || (!this.room.host && p.address === id.slice(0,10)))
+    result.peers = peers.filter(p => memberIds.has(p.address) || (!room.host && p.address === id.slice(0,10)))
       .map(p => ({address:p.address,latency:p.latency, direct:(p.paths || []).some(path => path.active)}));
     return result;
+  }
+
+  async roomLinks({room, address, network, members = []}) {
+    if (!room || room !== this.room || network?.status !== 'OK') return null;
+    const targets = room.host
+      ? members.filter(member => member.authorized).map(member => member.address || member.id)
+      : [room.id.slice(0, 10)];
+    const ids = [...new Set(targets)].filter(id => id !== address && /^[0-9a-f]{10}$/.test(id));
+    const peers = ids.length ? await this.api('GET', '/peer') : [];
+    if (room !== this.room) return null;
+    const peersById = new Map(peers.map(peer => [peer.address, peer]));
+    return {
+      roomId: room.id,
+      sampledAt: Date.now(),
+      links: ids.map(id => {
+        const peer = peersById.get(id);
+        return {
+          address: id,
+          latency: Number.isFinite(peer?.latency) && peer.latency >= 0 ? peer.latency : null,
+          direct: Boolean(peer?.paths?.some(path => path.active))
+        };
+      })
+    };
   }
 }
 module.exports = {Network,request,networkId,nodeId};

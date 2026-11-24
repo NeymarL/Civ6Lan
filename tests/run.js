@@ -8,6 +8,7 @@ function fixture(fail){
     if(fail && fail(method,path,body))throw new Error('injected failure');
     if(path==='/status')return {address:OWNER,online:true};
     if(method==='GET' && path==='/network')return [];
+    if(method==='GET' && path==='/peer')return [];
     if(method==='POST' && path.endsWith('______'))return {id:ID};
     return {};
   };
@@ -45,9 +46,15 @@ async function run(){
   assert.equal(f.service.room,null);
   f=fixture();
   const originalApi=f.service.api;
-  f.service.api=(method,path,body)=>method==='GET'&&path==='/network'?Promise.resolve([{id:ID}]):originalApi(method,path,body);
-  await assert.rejects(()=>f.service.join(ID));
-  assert(!f.calls.some(c=>c.method==='DELETE'));
+  f.service.api=(method,path,body)=>method==='GET'&&path==='/network'?Promise.resolve([{nwid:ID,status:'ACCESS_DENIED'}]):originalApi(method,path,body);
+  await f.service.join(ID);
+  assert.equal(f.saved().room.existingNetwork,true);
+  assert.equal(f.saved().room.host,false);
+  const reopened = new Network(f.service.api, f.service.persist, f.saved());
+  assert.equal((await reopened.snapshot()).network.status,'ACCESS_DENIED');
+  await reopened.leave();
+  assert.equal(f.saved().room,null);
+  assert(f.calls.every(c=>c.method==='GET'));
   f=fixture();await f.service.create('snapshot');
   const baseApi=f.service.api;
   f.service.api=async(method,path,body)=>{
@@ -61,6 +68,6 @@ async function run(){
   const state=await f.service.snapshot();
   assert.equal(state.members.length,2);assert.equal(state.network.status,'OK');
   assert.equal(state.peers.length,1);assert.equal(state.peers[0].direct,true);
-  console.log('PASS: 邀请码校验、私有网络配置、授权、重复加入保护、房主退出、创建/保存失败回滚');
+  console.log('PASS: 邀请码校验、授权、沿用已有网络、房主退出、创建/保存失败回滚');
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});

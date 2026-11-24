@@ -1,5 +1,6 @@
 const $ = id => document.getElementById(id);
 let state, working=false, refreshing=false, installation={phase:'idle'};
+let linkRoomId=null, linkInterval, linkSample, linkError, linkRequest;
 const labels={OK:'网络就绪',ACCESS_DENIED:'等待房主批准',REQUESTING_CONFIGURATION:'正在获取网络配置',NOT_FOUND:'房主离线或房间不存在',PORT_ERROR:'虚拟网卡异常',CLIENT_TOO_OLD:'请升级 ZeroTier',AUTHENTICATION_REQUIRED:'需要认证',NOT_JOINED:'本机未加入，请退出后重新加入'};
 function notice(message){$('notice').textContent=message || ''; $('notice').hidden=!message;}
 async function call(name,...args){const result=await window.lan[name](...args);if(!result.ok)throw new Error(result.error);return result.data;}
@@ -18,17 +19,95 @@ function renderInstall(value){
 }
 window.lan.onInstallProgress(renderInstall);
 call('installStatus').then(renderInstall).catch(e=>notice(e.message));
+function renderRoomLinks(){
+  if (!state?.room) return;
+  if (state.network.status!=='OK') {
+    $('roomLinksUpdated').textContent='每 30 秒刷新';
+    $('roomLinksStatus').textContent='网络就绪后显示联机延迟。';
+    $('roomLinksStatus').hidden=false;
+    $('roomLinksTable').hidden=true;
+    $('roomLinksRows').replaceChildren();
+    return;
+  }
+  const targets=state.room.host
+    ? [...new Set((state.members || []).filter(m=>m.authorized).map(m=>m.address || m.id))]
+        .filter(id=>id && id!==state.address)
+    : [state.room.id.slice(0,10)];
+  const byAddress=new Map((linkSample?.links || []).map(link=>[link.address,link]));
+  $('roomLinksUpdated').textContent=linkSample
+    ? `每 30 秒刷新 · 上次读取 ${new Date(linkSample.sampledAt).toLocaleTimeString('zh-CN',{hour12:false})}`
+    : '每 30 秒刷新';
+  $('roomLinksStatus').textContent=linkError || (!targets.length
+    ? '其他成员获批后会显示在这里。'
+    : state.room.host ? '' : '成员端可查看与房主的延迟。');
+  $('roomLinksStatus').hidden=!$('roomLinksStatus').textContent;
+  $('roomLinksTable').hidden=!targets.length;
+  const rows=targets.map(address=>{
+    const row=document.createElement('tr');
+    const link=byAddress.get(address);
+    const cells=[
+      state.room.host ? address : `${address}（房主）`,
+      link?.direct ? '直连' : '未确认',
+      link && link.latency!==null ? `${Math.round(link.latency)} ms` : '暂无数据'
+    ];
+    cells.forEach((value,index)=>{
+      const cell=document.createElement(index===0?'th':'td');
+      if(index===0)cell.scope='row';
+      cell.textContent=value;
+      row.append(cell);
+    });
+    return row;
+  });
+  $('roomLinksRows').replaceChildren(...rows);
+}
+async function refreshRoomLinks(){
+  if (!linkRoomId || linkRequest) return;
+  const request={};
+  linkRequest=request;
+  try {
+    const sample=await call('roomLinks');
+    if (request===linkRequest && sample?.roomId===linkRoomId) {
+      linkSample=sample;
+      linkError=undefined;
+    }
+  } catch (_) {
+    if (request===linkRequest) {
+      linkSample=undefined;
+      linkError='暂时无法读取延迟，下一次会自动重试。';
+    }
+  } finally {
+    if (request===linkRequest) {
+      linkRequest=undefined;
+      renderRoomLinks();
+    }
+  }
+}
+function watchRoomLinks(roomId){
+  if (roomId!==linkRoomId) {
+    clearInterval(linkInterval);
+    linkRoomId=roomId;
+    linkSample=linkError=linkRequest=undefined;
+    if (roomId) {
+      refreshRoomLinks();
+      linkInterval=setInterval(refreshRoomLinks,30000);
+    }
+  }
+  renderRoomLinks();
+}
 function render(s){
   state=s;
   // 本机服务可用就无需安装。尚未上线时保留授权连接入口。
   $('download').hidden=true;
+  $('restartService').hidden=false;
   $('connectionActions').hidden=!!s.online;
   $('service').textContent=s.online?'ZeroTier 已连接互联网':'ZeroTier 运行中，尚未上线';
   $('dot').className='dot'+(s.online?' online':'');
   $('device').textContent=`本机设备 ID：${s.address} · ZeroTier ${s.version}`;
   $('lobby').hidden=!!s.room; $('room').hidden=!s.room;
+  watchRoomLinks(s.network?.status==='OK' ? s.room.id : null);
   if(!s.room)return;
-  $('role').textContent=s.room.host?'房主 / 网络控制器':'成员 / 已申请加入';
+  $('role').textContent=s.room.host?'房主 / 网络控制器':s.room.existingNetwork?'成员 / 已识别现有网络':'成员 / 已申请加入';
+  $('leave').textContent=s.room.existingNetwork?'关闭房间页面':'退出房间';
   $('roomName').textContent=s.network.name || s.room.name || '好友房间';
   $('invite').textContent='CIV6-'+s.room.id;
   $('networkState').textContent=labels[s.network.status] || s.network.status || '未知';
@@ -45,7 +124,6 @@ function render(s){
     if(id!==s.address){const button=document.createElement('button');button.textContent=m.authorized?'撤销授权':'核对后批准';button.disabled=working;button.onclick=()=>action(()=>call('member',id,!m.authorized));row.append(button);}
     $('members').append(row);
   }
-  $('peers').textContent=(s.peers || []).map(p=>`${p.address} · ${p.direct?'存在直连路径':'尚无活跃直连路径，可能中继或尚未建立连接'} · ${p.latency>=0?p.latency+' ms':'延迟未知'}`).join(' / ');
 }
 async function refresh(){
   if(refreshing)return;
@@ -69,6 +147,17 @@ $('authorize').onclick=()=>action(async()=>{
   finally{button.textContent='授权连接';}
 });
 $('saveToken').onclick=()=>action(async()=>{const value=$('token').value;$('token').value='';await call('token',value);});
+$('restartService').onclick=()=>action(async()=>{
+  const button=$('restartService');
+  button.textContent='正在重启…';
+  notice('ZeroTier 正在重启，将短暂中断虚拟网络连接。如系统弹出授权窗口，请完成授权。');
+  try {
+    const result=await call('restartService');
+    notice(result.online?'ZeroTier 已重启并上线。':'ZeroTier 已重启，仍在等待上线。若持续未上线，可切换到手机热点测试。');
+  } finally {
+    button.textContent='重启 ZeroTier';
+  }
+});
 $('create').onclick=()=>action(()=>call('create',$('name').value));
 $('join').onclick=()=>action(()=>call('join',$('code').value));
 $('leave').onclick=()=>action(()=>call('leave'));
