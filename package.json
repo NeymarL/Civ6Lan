@@ -1,6 +1,6 @@
 {
   "name": "civ6-lan-companion",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "private": true,
   "description": "文明6异地局域网联机助手",
   "main": "src/main.js",

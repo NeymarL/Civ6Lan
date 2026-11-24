@@ -20,6 +20,8 @@ window.lan.onInstallProgress(renderInstall);
 call('installStatus').then(renderInstall).catch(e=>notice(e.message));
 function render(s){
   state=s;
+  // 本机服务可用就无需安装。尚未上线时保留授权连接入口。
+  $('download').hidden=true;
   $('connectionActions').hidden=!!s.online;
   $('service').textContent=s.online?'ZeroTier 已连接互联网':'ZeroTier 运行中，尚未上线';
   $('dot').className='dot'+(s.online?' online':'');
@@ -45,7 +47,21 @@ function render(s){
   }
   $('peers').textContent=(s.peers || []).map(p=>`${p.address} · ${p.direct?'存在直连路径':'尚无活跃直连路径，可能中继或尚未建立连接'} · ${p.latency>=0?p.latency+' ms':'延迟未知'}`).join(' / ');
 }
-async function refresh(){if(refreshing)return;refreshing=true;try{render(await call('snapshot'));}catch(e){$('connectionActions').hidden=false;$('service').textContent='本机服务尚未连接';$('dot').className='dot';notice(e.message);}finally{refreshing=false;}}
+async function refresh(){
+  if(refreshing)return;
+  refreshing=true;
+  try {
+    render(await call('snapshot'));
+  } catch(e) {
+    $('download').hidden=false;
+    $('connectionActions').hidden=false;
+    $('service').textContent='本机服务尚未连接';
+    $('dot').className='dot';
+    notice(e.message);
+  } finally {
+    refreshing=false;
+  }
+}
 $('authorize').onclick=()=>action(async()=>{
   const button=$('authorize');button.textContent='正在连接…';
   notice('正在检测本机服务；如系统弹出授权窗口，请完成授权。');
