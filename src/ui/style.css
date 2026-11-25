@@ -9,3 +9,4 @@
 .room-links thead th{color:#a4b2c3;font-size:12px;font-weight:500}
 .room-links tbody th{font-weight:500}
 .room-links th:last-child,.room-links td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.profile{margin-top:16px;padding:16px 24px}.profile label{margin:0 0 8px}.profile button{flex-shrink:0}.invite code,.member strong{overflow-wrap:anywhere}

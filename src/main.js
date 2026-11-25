@@ -3,16 +3,21 @@ const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
 const {execFile} = require('child_process');
-const {Network,request} = require('./network');
+const {Network,request,inviteCode,parseInvite,applicationCode} = require('./network');
 const {downloadInstaller} = require('./installer');
 const {servicePort,requestWithServiceToken} = require('./service-config');
 const {restartService} = require('./restart-service');
+const {MacBroadcast} = require('./macos-broadcast');
+const {WindowsBroadcast} = require('./windows-broadcast');
+const {RoomProfiles} = require('./room-profiles');
 if(process.argv.some(arg=>['--smoke-test','--download-test'].includes(arg))) {
   const testData=path.join(os.tmpdir(),'civ6-lan-check-'+process.pid);
   require('fs').mkdirSync(testData,{recursive:true});app.setPath('userData',testData);
 }
 let win, token, service, busy = false;
 let lastRoomSnapshot;
+const broadcast = process.platform==='win32' ? new WindowsBroadcast() : new MacBroadcast();
+const profiles = new RoomProfiles();
 let installState={phase:'idle'}, downloadAbort;
 function installProgress(value) {
   installState=value;
@@ -119,17 +124,33 @@ else app.whenReady().then(async()=>{
   }
   let saved={};
   try { saved=JSON.parse(await fs.readFile(path.join(app.getPath('userData'),'room.json'),'utf8')); } catch (_) {}
-  if (saved.room && !/^[0-9a-f]{16}$/.test(saved.room.id)) saved={};
-  service=new Network(requestLocalService,atomicSave,saved);
+  if (saved?.room) {
+    try {
+      if (!/^[0-9a-f]{16}$/.test(saved.room.id)) throw new Error('invalid room');
+      parseInvite(inviteCode(saved.room));
+    } catch (_) { saved.room=null; }
+  }
+  service=new Network(requestLocalService,atomicSave,saved || {});
   handle('snapshot',async()=>{
     const state=await service.snapshot({includePeers:false});
+    if (state.room!==service.room) return {...state,discovery:{available:false,active:false}};
     lastRoomSnapshot=state;
     if(installState.phase==='waiting')installProgress({phase:'complete',message:'已检测到 ZeroTier 服务，可以创建或加入房间。'});
-    return state;
+    const [members, discovery]=await Promise.all([profiles.sync(state,service.nickname),broadcast.update(state.room,state.network)]);
+    return {...state, members, discovery, invite:state.room ? inviteCode(state.room,state.network) : null};
   });
+  handle('nickname',()=>service.nickname);
+  handle('saveNickname',value=>service.setNickname(value),true);
   handle('roomLinks',async()=>lastRoomSnapshot ? service.roomLinks(lastRoomSnapshot) : null);
   handle('authorize',authorize,true);
+  handle('enableDiscovery',async()=>{
+    const state=await service.snapshot({includePeers:false});
+    if (!state.room) throw new Error('请先创建或加入房间。');
+    return broadcast.enable(state.network,state.room.id);
+  },true);
+  handle('disableDiscovery',()=>broadcast.disable(),true);
   handle('restartService',async()=>{
+    await broadcast.disable();
     const status = await restartService(()=>service.api('GET','/status'));
     return {online:status.online};
   },true);
@@ -144,13 +165,27 @@ else app.whenReady().then(async()=>{
   handle('member',(id,allow)=>service.authorize(id,allow),true);
   handle('leave',async()=>{
     if(!service.room) return;
-    if(service.room.existingNetwork) return service.leave();
-    const answer=await dialog.showMessageBox(win,{type:'question',buttons:['取消','确认退出'],defaultId:0,cancelId:0,
-      message:service.room.host?'关闭房间并退出？':'退出虚拟局域网？',
-      detail:service.room.host?'这会删除本应用创建的网络，所有朋友将失去该网络的联机权限。':'文明6连接可能中断。'});
-    if(answer.response===1) await service.leave();
+    if(!service.room.existingNetwork) {
+      const answer=await dialog.showMessageBox(win,{type:'question',buttons:['取消','确认退出'],defaultId:0,cancelId:0,
+        message:service.room.host?'关闭房间并退出？':'退出虚拟局域网？',
+        detail:service.room.host?'这会删除本应用创建的网络，所有朋友将失去该网络的联机权限。':'文明6连接可能中断。'});
+      if(answer.response!==1) return;
+    }
+    await broadcast.disable();
+    await service.leave();
+    profiles.close();
   },true);
-  handle('copy',()=>{if(service.room) clipboard.writeText('CIV6-'+service.room.id);});
+  handle('copy',async()=>{
+    if(!service.room) return;
+    const state=await service.snapshot({includePeers:false});
+    clipboard.writeText(inviteCode(state.room,state.network));
+  },true);
+  handle('copyApplication',async()=>{
+    if (!service.room || service.room.host) throw new Error('请先申请加入房间。');
+    const status=await service.api('GET','/status');
+    clipboard.writeText(applicationCode(service.room.id,status.address,service.nickname));
+  },true);
+  handle('pasteApplication',()=>service.acceptApplication(clipboard.readText()),true);
   handle('download',installZeroTier,true);
   handle('installStatus',()=>installState);
   handle('cancelDownload',()=>{if(downloadAbort)downloadAbort.abort();});
@@ -186,3 +221,7 @@ else app.whenReady().then(async()=>{
   app.on('second-instance',()=>{if(win){if(win.isMinimized())win.restore();win.focus();}});
 });
 app.on('window-all-closed',()=>app.quit());
+app.on('before-quit',()=>{
+  profiles.close();
+  void broadcast.disable().catch(()=>{});
+});

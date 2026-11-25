@@ -1,6 +1,8 @@
 const assert = require('assert');
-const {Network,networkId,nodeId}=require('../src/network');
+const {Network,networkId,nodeId,parseInvite,inviteCode,applicationCode,parseApplication}=require('../src/network');
+const {RoomProfiles}=require('../src/room-profiles');
 const ID='0123456789abcdef', OWNER='0123456789', FRIEND='abcdef0123';
+const INVITE='CIV6-'+ID+'-0a46010a';
 function fixture(fail){
   const calls=[];let saved;
   const api=async(method,path,body)=>{
@@ -19,25 +21,40 @@ async function run(){
   assert.equal(networkId(' CIV6-0123456789ABCDEF '),ID);
   for(const bad of ['../status','123',ID+'/member','']) assert.throws(()=>networkId(bad));
   assert.throws(()=>nodeId('../status'));
+  assert.deepEqual(parseInvite('CIV6-'+ID),{id:ID});
+  assert.deepEqual(parseInvite(INVITE),{id:ID,hostIp:'10.70.1.10'});
+  assert.throws(()=>parseInvite('CIV6-'+ID+'-'+ID));
+  const application=applicationCode(ID,FRIEND,'小白 🎲');
+  assert.deepEqual(parseApplication(application),{room:ID,address:FRIEND,nickname:'小白 🎲'});
+  assert.throws(()=>parseApplication('CIV6-REQUEST-invalid'));
+  assert.throws(()=>applicationCode(ID,FRIEND,'\u202e显示'));
   let f=fixture();await f.service.create('好友局');
   assert.equal(f.saved().room.host,true);
+  assert.equal(inviteCode(f.service.room,{status:'OK',assignedAddresses:['10.70.1.10/24']}),INVITE);
+  await f.service.setNickname('  回合玩家 🎲  ');
+  assert.equal(f.saved().nickname,'回合玩家 🎲');
+  assert.equal(new Network(f.service.api,f.service.persist,f.saved()).nickname,'回合玩家 🎲');
   const config=f.calls.find(c=>c.path.endsWith('______')).body;
   assert.equal(config.private,true);assert.equal(config.enableBroadcast,true);
   assert.deepEqual(config.v4AssignMode,{zt:true});
   assert.equal(config.routes[0].via,null);
   assert.equal(f.calls.find(c=>c.path===`/network/${ID}`).body.allowDefault,false);
+  await assert.rejects(()=>f.service.acceptApplication(application),/还没收到/);
   await assert.rejects(()=>f.service.create('duplicate'));
   await f.service.authorize(FRIEND,true);
   assert.equal(f.calls[f.calls.length-1].body.authorized,true);
   await assert.rejects(()=>f.service.authorize(OWNER,false));
   await f.service.leave();assert.equal(f.saved().room,null);
+  assert.equal(f.saved().nickname,'回合玩家 🎲');
   assert(f.calls.some(c=>c.method==='DELETE'&&c.path===`/controller/network/${ID}`));
   f=fixture((m,p)=>p===`/network/${ID}` && m==='POST');
   await assert.rejects(()=>f.service.create('fail'));
   assert.equal(f.service.room,null);
   assert(f.calls.some(c=>c.method==='DELETE'&&c.path===`/controller/network/${ID}`));
-  f=fixture();await f.service.join('CIV6-'+ID);
+  f=fixture();await f.service.join(INVITE);
   assert.equal(f.saved().room.host,false);
+  assert.equal(f.saved().room.hostIp,'10.70.1.10');
+  await assert.rejects(()=>f.service.acceptApplication(application),/只有房主/);
   await assert.rejects(()=>f.service.authorize(FRIEND,true));
   await f.service.leave();assert(!f.calls.some(c=>c.path.startsWith('/controller')));
   f=fixture();f.service.persist=async()=>{throw new Error('disk full');};
@@ -65,9 +82,18 @@ async function run(){
     if(path==='/peer')return [{address:FRIEND,latency:42,paths:[{active:true}]},{address:'eeeeeeeeee',paths:[]}];
     return baseApi(method,path,body);
   };
+  const callsBeforePaste=f.calls.length;
+  assert.equal(await f.service.acceptApplication(application),'小白 🎲');
+  assert.equal(f.saved().room.applications[FRIEND],'小白 🎲');
+  assert.equal(f.calls.length,callsBeforePaste);
   const state=await f.service.snapshot();
   assert.equal(state.members.length,2);assert.equal(state.network.status,'OK');
   assert.equal(state.peers.length,1);assert.equal(state.peers[0].direct,true);
-  console.log('PASS: 邀请码校验、授权、沿用已有网络、房主退出、创建/保存失败回滚');
+  const profiles=new RoomProfiles();
+  try {
+    const members=await profiles.sync(state,'房主');
+    assert.deepEqual(members.find(m=>m.address===FRIEND),{id:FRIEND,address:FRIEND,authorized:false,nickname:'小白 🎲'});
+  } finally {profiles.close();}
+  console.log('PASS: 邀请码、昵称保存、审批前读取申请、授权、已有网络与失败回滚');
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});

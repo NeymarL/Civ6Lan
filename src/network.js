@@ -1,6 +1,9 @@
 const http = require('http');
 const crypto = require('crypto');
 const os = require('os');
+const {nickname, savedNickname, gameIPv4} = require('./room-profiles');
+
+const JOIN_SETTINGS = {allowManaged:true,allowGlobal:false,allowDefault:false,allowDNS:false};
 
 function networkId(value) {
   const id = String(value || '').trim().replace(/^CIV6-/i, '').toLowerCase();
@@ -10,6 +13,32 @@ function networkId(value) {
 function nodeId(value) {
   if (!/^[0-9a-f]{10}$/.test(value)) throw new Error('设备 ID 无效。');
   return value;
+}
+function parseInvite(value) {
+  const ids = String(value || '').trim().replace(/^CIV6-/i, '').toLowerCase().split('-');
+  const id = networkId(ids[0]);
+  if (ids.length === 1) return {id};
+  if (ids.length !== 2 || !/^[0-9a-f]{8}$/.test(ids[1])) {
+    throw new Error('邀请码不完整，请从房主的 App 重新复制。');
+  }
+  return {id,hostIp:[...Buffer.from(ids[1],'hex')].join('.')};
+}
+function inviteCode(room, network) {
+  const address = room.host ? gameIPv4(network) : room.hostIp;
+  return 'CIV6-'+room.id+(address ? '-'+Buffer.from(address.split('.').map(Number)).toString('hex') : '');
+}
+function applicationCode(id, address, name) {
+  return 'CIV6-REQUEST-'+Buffer.from(JSON.stringify({room:networkId(id),address:nodeId(address),nickname:nickname(name)})).toString('base64url');
+}
+function parseApplication(value) {
+  const code = typeof value==='string' && value.length<400 && /^CIV6-REQUEST-([A-Za-z0-9_-]+)$/.exec(value.trim());
+  try {
+    if (!code) throw new Error();
+    const data = JSON.parse(Buffer.from(code[1],'base64url'));
+    return {room:networkId(data.room),address:nodeId(data.address),nickname:nickname(data.nickname)};
+  } catch (_) {
+    throw new Error('剪贴板里的加入申请格式无效。');
+  }
 }
 function request(token, method, path, body, port=9993) {
   if(!Number.isInteger(port) || port<1 || port>65535)return Promise.reject(new Error('本机服务端口无效。'));
@@ -39,8 +68,32 @@ function request(token, method, path, body, port=9993) {
   });
 }
 class Network {
-  constructor(api, persist, saved = {}) { this.api = api; this.persist = persist; this.room = saved.room || null; }
-  async save(room) { await this.persist({room}); this.room = room; }
+  constructor(api, persist, saved = {}) {
+    this.api = api;
+    this.persist = persist;
+    this.room = saved.room || null;
+    this.nickname = savedNickname(saved.nickname);
+  }
+  async save(room, name = this.nickname) {
+    await this.persist({room,nickname:name});
+    this.room = room;
+    this.nickname = name;
+  }
+  async setNickname(value) {
+    const name = nickname(value);
+    if (name !== this.nickname) await this.save(this.room, name);
+    return name;
+  }
+  async acceptApplication(value) {
+    const room = this.room;
+    if (!room?.host) throw new Error('只有房主可以读取加入申请。');
+    const applicant = parseApplication(value);
+    if (applicant.room!==room.id || applicant.address===room.id.slice(0,10)) throw new Error('此加入申请与当前房间不匹配。');
+    const members = await this.api('GET',`/controller/network/${room.id}/member`);
+    if (!Object.hasOwn(members,applicant.address)) throw new Error('还没收到此设备的入房请求。请稍候，再粘贴加入申请。');
+    await this.save({...room,applications:{...room.applications,[applicant.address]:applicant.nickname}});
+    return applicant.nickname || applicant.address;
+  }
   async create(name) {
     if (this.room) throw new Error('请先离开当前房间。');
     name = String(name || '').trim().slice(0, 48) || '文明6好友局';
@@ -61,7 +114,7 @@ class Network {
       });
       id = networkId(created.id || created.nwid);
       await this.api('POST', `/controller/network/${id}/member/${owner}`, {authorized:true});
-      await this.api('POST', `/network/${id}`, {allowManaged:true,allowGlobal:false,allowDefault:false,allowDNS:false});
+      await this.api('POST', `/network/${id}`, JOIN_SETTINGS);
       await this.save({id,name,host:true});
       return this.room;
     } catch (error) {
@@ -74,17 +127,22 @@ class Network {
   }
   async join(code) {
     if (this.room) throw new Error('请先离开当前房间。');
-    const id = networkId(code);
+    const {id, hostIp} = parseInvite(code);
     const networks = await this.api('GET', '/network');
-    const existing = networks.find(network => (network.id || network.nwid) === id);
-    if (existing) {
-      await this.save({id, host:false, existingNetwork:true});
+    const hasNetwork = nwid => networks.some(network => (network.id || network.nwid) === nwid);
+    const existingNetwork = hasNetwork(id);
+    let joinedGame = false;
+    try {
+      if (!existingNetwork) {
+        await this.api('POST', `/network/${id}`, JOIN_SETTINGS);
+        joinedGame = true;
+      }
+      await this.save({id,host:false,existingNetwork,hostIp});
       return this.room;
+    } catch (error) {
+      if (joinedGame) await this.api('DELETE', `/network/${id}`).catch(()=>{});
+      throw error;
     }
-    await this.api('POST', `/network/${id}`, {allowManaged:true,allowGlobal:false,allowDefault:false,allowDNS:false});
-    try { await this.save({id,host:false}); }
-    catch (error) { await this.api('DELETE', `/network/${id}`).catch(()=>{}); throw error; }
-    return this.room;
   }
   async leave() {
     if (!this.room) return;
@@ -145,4 +203,4 @@ class Network {
     };
   }
 }
-module.exports = {Network,request,networkId,nodeId};
+module.exports = {Network,request,networkId,nodeId,parseInvite,inviteCode,applicationCode,parseApplication};
