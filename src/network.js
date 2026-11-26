@@ -15,17 +15,34 @@ function nodeId(value) {
   return value;
 }
 function parseInvite(value) {
-  const ids = String(value || '').trim().replace(/^CIV6-/i, '').toLowerCase().split('-');
-  const id = networkId(ids[0]);
-  if (ids.length === 1) return {id};
-  if (ids.length !== 2 || !/^[0-9a-f]{8}$/.test(ids[1])) {
-    throw new Error('邀请码不完整，请从房主的 App 重新复制。');
+  const code = String(value || '').trim().replace(/^CIV6-/i, '');
+  if (code.startsWith('S')) {
+    const encoded = code.slice(1);
+    const data = Buffer.from(encoded, 'base64url');
+    if (!/^[A-Za-z0-9_-]+$/.test(encoded) || ![8,12].includes(data.length) || data.toString('base64url')!==encoded) {
+      throw new Error('邀请码不完整，请从房主的 App 重新复制。');
+    }
+    return {id:data.subarray(0,8).toString('hex'), ...(data.length===12 ? {hostIp:[...data.subarray(8)].join('.')} : {})};
   }
-  return {id,hostIp:[...Buffer.from(ids[1],'hex')].join('.')};
+  const [main, encodedName, extra] = code.split('.');
+  const match = /^([0-9a-f]{16})(?:-([0-9a-f]{8}))?$/i.exec(main);
+  if (!match || extra!==undefined) throw new Error('邀请码不完整，请从房主的 App 重新复制。');
+  const result={id:networkId(match[1])};
+  if (match[2]) result.hostIp=[...Buffer.from(match[2],'hex')].join('.');
+  if (encodedName!==undefined) {
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(encodedName)) throw new Error('邀请码里的昵称无效。');
+    const name=Buffer.from(encodedName,'base64url').toString('utf8');
+    if (!name || Buffer.from(name).toString('base64url')!==encodedName) throw new Error('邀请码里的昵称无效。');
+    result.hostNickname=nickname(name);
+  }
+  return result;
 }
 function inviteCode(room, network) {
   const address = room.host ? gameIPv4(network) : room.hostIp;
-  return 'CIV6-'+room.id+(address ? '-'+Buffer.from(address.split('.').map(Number)).toString('hex') : '');
+  // Keep the routing information; nicknames sync through the room roster.
+  const data = Buffer.concat([Buffer.from(networkId(room.id),'hex'),
+    ...(address ? [Buffer.from(address.split('.').map(Number))] : [])]);
+  return 'S'+data.toString('base64url');
 }
 function applicationCode(id, address, name) {
   return 'CIV6-REQUEST-'+Buffer.from(JSON.stringify({room:networkId(id),address:nodeId(address),nickname:nickname(name)})).toString('base64url');

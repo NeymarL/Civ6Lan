@@ -23,6 +23,18 @@ async function run(){
   assert.throws(()=>nodeId('../status'));
   assert.deepEqual(parseInvite('CIV6-'+ID),{id:ID});
   assert.deepEqual(parseInvite(INVITE),{id:ID,hostIp:'10.70.1.10'});
+  const shortInvite=inviteCode({id:ID,host:true},{status:'OK',assignedAddresses:['10.70.1.10/24']},'房主 🎲');
+  assert.equal(shortInvite.length,17);
+  assert.deepEqual(parseInvite('CIV6-'+shortInvite),parseInvite(shortInvite));
+  assert.deepEqual(parseInvite(shortInvite),{id:ID,hostIp:'10.70.1.10'});
+  assert.equal(inviteCode({id:ID,host:false,hostIp:'10.70.1.10'}),shortInvite);
+  assert.deepEqual(parseInvite(inviteCode({id:ID,host:true})),{id:ID});
+  for (const bad of [shortInvite+'.',shortInvite.slice(0,-1),shortInvite+'A','CIV6-S']) assert.throws(()=>parseInvite(bad));
+  const shortJoin=fixture();
+  await shortJoin.service.join(shortInvite);
+  assert.equal(shortJoin.service.room.hostIp,'10.70.1.10');
+  const namedInvite=INVITE+'.'+Buffer.from('房主 🎲').toString('base64url');
+  assert.deepEqual(parseInvite(namedInvite),{id:ID,hostIp:'10.70.1.10',hostNickname:'房主 🎲'});
   assert.throws(()=>parseInvite('CIV6-'+ID+'-'+ID));
   const application=applicationCode(ID,FRIEND,'小白 🎲');
   assert.deepEqual(parseApplication(application),{room:ID,address:FRIEND,nickname:'小白 🎲'});
@@ -30,7 +42,7 @@ async function run(){
   assert.throws(()=>applicationCode(ID,FRIEND,'\u202e显示'));
   let f=fixture();await f.service.create('好友局');
   assert.equal(f.saved().room.host,true);
-  assert.equal(inviteCode(f.service.room,{status:'OK',assignedAddresses:['10.70.1.10/24']}),INVITE);
+  assert.equal(inviteCode(f.service.room,{status:'OK',assignedAddresses:['10.70.1.10/24']}),shortInvite);
   await f.service.setNickname('  回合玩家 🎲  ');
   assert.equal(f.saved().nickname,'回合玩家 🎲');
   assert.equal(new Network(f.service.api,f.service.persist,f.saved()).nickname,'回合玩家 🎲');

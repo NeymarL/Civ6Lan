@@ -14,7 +14,7 @@
   <div class="row"><input id="nickname" maxlength="48" placeholder="最多 24 个字符" autocomplete="off"><button type="submit">保存昵称</button></div>
 </form>
 <section id="lobby" class="grid"><article class="panel"><div class="eyebrow">01 / 我来组织</div><h2>创建好友房间</h2><p>本机作为网络控制器。房主需要保持电脑及 ZeroTier 服务运行。</p><label for="name">房间名称</label><input id="name" maxlength="48" value="今晚再来一回合"><button id="create" class="primary wide">创建房间 ↗</button></article>
-<article class="panel"><div class="eyebrow">02 / 朋友已就位</div><h2>加入好友房间</h2><p>输入房主分享的邀请码。房主会核对你的昵称和设备 ID。</p><label for="code">邀请码</label><input id="code" placeholder="粘贴 CIV6- 开头的邀请码" spellcheck="false"><button id="join" class="wide">申请加入 →</button></article></section>
+<article class="panel"><div class="eyebrow">02 / 朋友已就位</div><h2>加入好友房间</h2><p>输入房主分享的邀请码。房主会核对你的昵称和设备 ID。</p><label for="code">邀请码</label><input id="code" placeholder="粘贴房主分享的邀请码" spellcheck="false"><button id="join" class="wide">申请加入 →</button></article></section>
 <section id="room" class="panel" hidden><div class="room-top"><div><div class="eyebrow" id="role"></div><h2 id="roomName"></h2></div><button id="leave" class="danger">退出房间</button></div><div class="invite"><code id="invite"></code><button id="copy">复制邀请码</button></div><div class="metrics"><div><label>网络状态</label><strong id="networkState">—</strong></div><div><label>本机虚拟 IP</label><strong id="ip">—</strong></div><div><label>已批准 / 已发现</label><strong id="count">—</strong></div></div><p id="hint"></p><div id="members"></div>
   <div class="actions">
     <button id="copyApplication" class="quiet" hidden>复制加入申请</button>
