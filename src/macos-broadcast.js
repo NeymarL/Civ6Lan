@@ -99,18 +99,31 @@ class MacBroadcast {
     const session = this.session;
     if (session && (session.roomId !== room?.id || network?.status !== 'OK' ||
       network.portDeviceName !== session.name)) await this.disable();
-    return {available: this.available(network), active: this.active};
+    const available = this.available(network);
+    const external = available && this.externalRoom===room?.id && await broadcastInterface()===network.portDeviceName;
+    return {available, active:this.active || Boolean(external), external:Boolean(external)};
   }
 
-  async enable(network, roomId) {
+  async enable(network, roomId, signal) {
+    signal?.throwIfAborted();
     if (!this.supported) throw new Error('当前系统尚不支持修复广播找房。');
     if (this.session) throw new Error('广播找房正在运行，请先关闭。');
     const {name,address} = roomInterface(network);
-    if (await broadcastInterface() === name) return {alreadyEnabled:true};
+    const current = await broadcastInterface();
+    signal?.throwIfAborted();
+    if (current === name) {
+      this.externalRoom = roomId;
+      return {alreadyEnabled:true};
+    }
     const marker = await fs.mkdtemp(path.join(os.tmpdir(),'civ6-broadcast-'));
+    if (signal?.aborted) {
+      await fs.rmdir(marker);
+      signal.throwIfAborted();
+    }
     const session = {marker, name, roomId, active:false, done:false};
     this.session = session;
     const invocation = exec('/usr/bin/osascript', ['-e',SCRIPT,'--',WATCH_ROUTE,name,address,marker,String(process.pid)]);
+    session.cancel = ()=>invocation.child.kill();
     session.finished = invocation
       .then(() => { session.done = true; }, error => {
         session.done = true;
@@ -120,14 +133,15 @@ class MacBroadcast {
         await fs.rmdir(marker).catch(()=>{});
       });
     const deadline = Date.now()+120000;
-    while (this.session === session && !session.done && Date.now() < deadline) {
-      if (await broadcastInterface() === name && !session.done && this.session === session) {
+    while (this.session === session && !session.done && !signal?.aborted && Date.now() < deadline) {
+      if (await broadcastInterface() === name && !session.done && !signal?.aborted && this.session === session) {
         session.active = true;
         return {alreadyEnabled:false};
       }
       await delay(350);
     }
-    await this.disable();
+    if (this.session === session && !signal?.aborted) await this.disable();
+    signal?.throwIfAborted();
     const stderr = session.error?.stderr || '';
     if (/\(-128\)/.test(stderr)) throw new Error('已取消局域网找房修复。');
     if (!session.done) {
@@ -139,10 +153,11 @@ class MacBroadcast {
   }
 
   async disable() {
+    this.externalRoom = undefined;
     const session = this.session;
     if (!session) return;
     await fs.rmdir(session.marker).catch(error=>{if(error.code!=='ENOENT')throw error;});
-    if (!session.active) return;
+    if (!session.active) { if (!session.done) session.cancel(); return; }
     await Promise.race([session.finished, delay(3500)]);
     if (!session.done) throw new Error('正在恢复原广播路由，请稍后重试。');
     if (session.error) throw new Error('系统报告广播路由清理异常，请检查当前网络设置。');

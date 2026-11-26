@@ -10,3 +10,10 @@
 .room-links tbody th{font-weight:500}
 .room-links th:last-child,.room-links td:last-child{text-align:right;font-variant-numeric:tabular-nums}
 .profile{margin-top:16px;padding:16px 24px}.profile label{margin:0 0 8px}.profile button{flex-shrink:0}.invite code,.member strong{overflow-wrap:anywhere}
+.startup{padding:28px;max-width:560px}
+.startup .brand{margin-bottom:24px}
+.startup h1{font-size:22px;letter-spacing:0;margin:0}
+.startup .actions{flex-wrap:wrap}
+.startup progress{margin-bottom:16px}
+.startup details{margin-top:12px}
+.startup-error{padding:12px 0;color:#e7aaaa;overflow-wrap:anywhere}

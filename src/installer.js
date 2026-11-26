@@ -3,10 +3,17 @@ const path = require('path');
 const crypto = require('crypto');
 
 // 固定官方版本和文件哈希；不下载可变的 latest 地址。
+const ZEROTIER_VERSION = '1.12.2';
 const installers = {
-  darwin: {version:'1.16.2',file:'ZeroTier-One-1.16.2.pkg',url:'https://download.zerotier.com/RELEASES/1.16.2/dist/ZeroTier%20One.pkg',sha256:'13b5054c0b51e337970e83da6f32bd245a70a5dd92421b08dadbefcaadf2f37f'},
-  win32: {version:'1.16.2',file:'ZeroTier-One-1.16.2.msi',url:'https://download.zerotier.com/RELEASES/1.16.2/dist/ZeroTier%20One.msi',sha256:'42514072b0fe44b8f66e0395bcd23a0b1d1642c28ed00831f1527b2f41b14670'}
+  darwin: installer('pkg', 'a7b144032dd5874cf4519194dd170c6fb460c3e3425db8942cd5a500a273745b'),
+  win32: installer('msi', 'f6c2b5605e786655552279b4b0b72d3f55fdd5d3f42ee8f5f2f24d146e8112e9')
 };
+function installer(extension, sha256) {
+  return {
+    version:ZEROTIER_VERSION, file:`ZeroTier-One-${ZEROTIER_VERSION}.${extension}`,
+    url:`https://download.zerotier.com/RELEASES/${ZEROTIER_VERSION}/dist/ZeroTier%20One.${extension}`, sha256
+  };
+}
 function trustedUrl(value) {
   const url = new URL(value);
   if (url.protocol !== 'https:' || url.hostname !== 'download.zerotier.com' || url.username || url.password || (url.port && url.port !== '443')) {
@@ -63,4 +70,4 @@ async function downloadInstaller({platform,directory,fetch,signal,onProgress=()=
     throw error;
   }
 }
-module.exports={downloadInstaller,installers,trustedUrl};
+module.exports={downloadInstaller,installers,trustedUrl,ZEROTIER_VERSION};

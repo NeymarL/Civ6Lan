@@ -3,7 +3,8 @@ const fs=require('fs').promises;
 const os=require('os');
 const path=require('path');
 const crypto=require('crypto');
-const {downloadInstaller,trustedUrl}=require('../src/installer');
+const {downloadInstaller,trustedUrl,installers,ZEROTIER_VERSION}=require('../src/installer');
+const {windowsReplacementCommand}=require('../src/replace-zerotier');
 async function test(){
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'civ6-installer-test-'));
   const bytes=Buffer.from('test installer bytes');
@@ -14,6 +15,17 @@ async function test(){
   }
   const options={platform:'darwin',directory,config,fetch:async()=>response()};
   try {
+    assert.equal(installers.darwin.version,ZEROTIER_VERSION);
+    assert.equal(installers.win32.version,ZEROTIER_VERSION);
+    const file = "C:\\Users\\Player's PC\\ZeroTier One.msi";
+    const {args}=windowsReplacementCommand(file,'1.16.2');
+    const encoded=/-EncodedCommand','([^']+)'/.exec(args.at(-1))[1];
+    const code=Buffer.from(encoded,'base64').toString('utf16le');
+    assert(code.includes('HKLM:\\SOFTWARE\\Microsoft'));
+    assert(code.includes(Buffer.from(file).toString('base64')));
+    assert(code.indexOf(installers.win32.sha256)<code.indexOf("'/x'"));
+    assert(code.indexOf("'/x'")<code.indexOf("'/i'"));
+    assert.throws(()=>windowsReplacementCommand(file,"1.16.2'; bad"),/无法确认/);
     for(const url of ['http://download.zerotier.com/a','https://evil.test/file','https://download.zerotier.com.evil.test/a','https://user:password@download.zerotier.com/a','https://download.zerotier.com:8080/a'])assert.throws(()=>trustedUrl(url));
     const phases=[];
     const result=await downloadInstaller({...options,onProgress:value=>phases.push(value.phase)});

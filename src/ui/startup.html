@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'">
+  <title>Civ6 LAN</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="startup">
+  <div class="brand">VI<span>CIV6 LAN</span></div>
+  <section id="servicePage">
+    <div class="panel">
+      <div role="status" aria-live="polite">
+        <h1 id="startupTitle">正在检查 ZeroTier</h1>
+        <p id="startupMessage">检查本机版本和服务状态。</p>
+      </div>
+      <progress id="startupProgress" max="100" aria-label="ZeroTier 安装进度"></progress>
+      <div class="actions">
+        <button id="startupRetry" class="primary" hidden>重试</button>
+        <button id="startupRestart" class="quiet" hidden>重启 ZeroTier</button>
+        <button id="startupCancel" class="quiet" hidden>取消下载</button>
+      </div>
+    </div>
+    <details id="startupToken" hidden>
+      <summary>输入本机 API Token</summary>
+      <p>请使用本机 ZeroTier 的 authtoken.secret。Windows 可在 %LOCALAPPDATA%\ZeroTier 中查找。</p>
+      <form id="tokenForm" class="row">
+        <input id="tokenValue" type="password" autocomplete="off" aria-label="本机 API Token" required>
+        <button type="submit">连接</button>
+      </form>
+    </details>
+  </section>
+  <section id="nicknamePage" class="panel" hidden>
+    <h1>确认联机昵称</h1>
+    <p>朋友会在房间和加入申请中看到这个昵称。</p>
+    <form id="startupNicknameForm">
+      <label for="startupNickname">我的昵称</label>
+      <input id="startupNickname" maxlength="48" placeholder="最多 24 个字符" autocomplete="off" required>
+      <button id="confirmNickname" type="submit" class="primary wide">确认并进入</button>
+    </form>
+  </section>
+  <div id="startupError" role="alert" class="startup-error" hidden></div>
+</main>
+<script src="startup-renderer.js"></script>
+</body>
+</html>

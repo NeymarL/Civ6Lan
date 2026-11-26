@@ -22,11 +22,13 @@ class WindowsBroadcast {
     return {available:Boolean(address),active:this.active};
   }
 
-  async enable(network, id) {
+  async enable(network, id, signal) {
+    signal?.throwIfAborted();
     if (this.session) throw new Error('局域网广播正在运行。');
     const address = gameAddress(network);
     if (!address) throw new Error('房间的 ZeroTier IPv4 地址尚未就绪。');
     const source = await fs.readFile(path.join(__dirname,'windows-broadcast.cs'));
+    signal?.throwIfAborted();
     const token = crypto.randomBytes(32).toString('hex');
     const listener = net.createServer();
     const session = {address,id,listener};
@@ -54,6 +56,7 @@ class WindowsBroadcast {
     });
     try {
       listener.listen(0,'127.0.0.1',()=>{
+        if (this.session!==session) return;
         const port = listener.address().port;
         const script = `$ErrorActionPreference='Stop'; Add-Type -TypeDefinition ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${source.toString('base64')}'))); [Civ6Broadcast]::Run('${address}',${port},'${token}')`;
         const encoded = Buffer.from(script,'utf16le').toString('base64');

@@ -139,7 +139,7 @@ class RoomProfiles {
     if (!self.authorized) return [self];
     const roster = sameSubnet(network,local,room.hostIp)
       ? await requestRoster(room.id,room.hostIp,local,name).catch(()=>null) : null;
-    const verified = new Map([[host,{address:host,nickname:'',authorized:true}]]);
+    const verified = new Map([[host,{address:host,nickname:savedNickname(room.hostNickname),authorized:true}]]);
     if (Array.isArray(roster)) {
       for (const item of roster) {
         if (item && ID.test(item.address)) verified.set(item.address,{address:item.address,nickname:savedNickname(item.nickname),authorized:true});
@@ -150,4 +150,4 @@ class RoomProfiles {
   }
 }
 
-module.exports = {PORT, RoomProfiles, nickname, savedNickname, gameIPv4};
+module.exports = {PORT, RoomProfiles, nickname, savedNickname, gameIPv4, sameSubnet};

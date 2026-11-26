@@ -2,6 +2,10 @@ const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
 
+function needsMacHostingRepair(version, platform=process.platform) {
+  return platform==='darwin' && /^1\.16\.[0-2]$/.test(version || '');
+}
+
 function serviceDirectory(platform=process.platform, env=process.env) {
   if(platform==='darwin')return '/Library/Application Support/ZeroTier/One';
   if(platform==='win32')return path.win32.join(env.ProgramData || 'C:\\ProgramData','ZeroTier','One');
@@ -68,4 +72,4 @@ async function servicePort(directory=serviceDirectory(),read=fs.readFile,platfor
     throw error;
   }
 }
-module.exports={serviceDirectory,servicePort,serviceTokenPaths,requestWithServiceToken,parsePort};
+module.exports={serviceDirectory,servicePort,serviceTokenPaths,requestWithServiceToken,parsePort,needsMacHostingRepair};

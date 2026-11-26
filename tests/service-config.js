@@ -1,10 +1,30 @@
 const assert=require('assert');
 const http=require('http');
 const {EventEmitter}=require('events');
-const {servicePort,serviceTokenPaths,requestWithServiceToken,parsePort}=require('../src/service-config');
-const {request}=require('../src/network');
+const {servicePort,serviceTokenPaths,requestWithServiceToken,parsePort,needsMacHostingRepair}=require('../src/service-config');
+const {Network,request}=require('../src/network');
+const {relayState,relayCommand}=require('../src/enhanced-connection');
 async function run(){
   assert.equal(parsePort('61109\n'),61109);
+  assert.deepEqual(relayState({config:{settings:{forceTcpRelay:true}}}),{forced:true,active:false});
+  assert.deepEqual(relayState({tcpFallbackActive:true}),{forced:false,active:true});
+  assert.throws(()=>relayCommand('true','darwin'),/连接模式无效/);
+  for (const version of ['1.16.0','1.16.1','1.16.2']) assert(needsMacHostingRepair(version,'darwin'));
+  for (const version of ['1.14.2','1.16.3']) assert(!needsMacHostingRepair(version,'darwin'));
+  assert(!needsMacHostingRepair('1.16.2','win32'));
+  if (process.platform==='darwin') {
+    const room={id:'0123456789abcdef',host:true};
+    const api=async (method,path)=>{
+      if (method==='GET' && path==='/status') return {address:'0123456789',online:true,version:'1.16.2'};
+      if (method==='GET' && path==='/network') return [];
+      assert.fail('Hosting operations must wait for a compatible controller.');
+    };
+    await assert.rejects(()=>new Network(api,()=>{}).create('好友房间'),/1\.12\.2/);
+    await assert.rejects(()=>new Network(api,()=>{}).join(room.id),/1\.12\.2/);
+    const savedHost=new Network(api,()=>{},{room});
+    assert.equal((await savedHost.snapshot({includePeers:false})).versionMismatch,true);
+    await assert.rejects(()=>savedHost.authorize('fedcba4321',true),/兼容建房/);
+  }
   for(const bad of ['0','65536','-1','1.2','9993/path','NaN',''])assert.throws(()=>parsePort(bad));
   assert.equal(await servicePort('/test',async()=> '61109'),61109);
   assert.equal(await servicePort('/test',async()=>{throw Object.assign(new Error(),{code:'ENOENT'});}),9993);
