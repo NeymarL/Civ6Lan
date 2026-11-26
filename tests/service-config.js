@@ -28,7 +28,7 @@ async function run(){
   for(const bad of ['0','65536','-1','1.2','9993/path','NaN',''])assert.throws(()=>parsePort(bad));
   assert.equal(await servicePort('/test',async()=> '61109'),61109);
   assert.equal(await servicePort('/test',async()=>{throw Object.assign(new Error(),{code:'ENOENT'});}),9993);
-  await assert.rejects(()=>servicePort('/test',async()=>{throw Object.assign(new Error('permission denied'),{code:'EACCES'});}));
+  await assert.rejects(()=>servicePort('/test',async()=>{throw Object.assign(new Error('permission denied'),{code:'EACCES'});},'darwin'));
   const windows = {LOCALAPPDATA:'C:\\Users\\Player\\AppData\\Local', ProgramData:'C:\\ProgramData'};
   const paths = serviceTokenPaths('win32', windows);
   const userToken = 'C:\\Users\\Player\\AppData\\Local\\ZeroTier\\authtoken.secret';
